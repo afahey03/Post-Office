@@ -1,6 +1,19 @@
 import type { Metadata } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import NavBar from "@/components/NavBar";
+
+const inter = Inter({
+    subsets: ["latin"],
+    weight: ["400", "500", "600"],
+    variable: "--font-sans",
+});
+
+const jetBrainsMono = JetBrains_Mono({
+    subsets: ["latin"],
+    weight: ["400", "500"],
+    variable: "--font-jetbrains-mono",
+});
 
 export const metadata: Metadata = {
     title: "Post Office",
@@ -9,12 +22,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
     return (
-        <html lang="en">
-            <head>
-                <link rel="preconnect" href="https://fonts.googleapis.com" />
-                <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-            </head>
+        <html lang="en" className={`${inter.variable} ${jetBrainsMono.variable}`}>
             <body>
                 <NavBar />
                 <main>{children}</main>

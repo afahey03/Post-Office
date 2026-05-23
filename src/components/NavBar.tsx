@@ -13,15 +13,16 @@ export default function NavBar() {
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
-            height: '52px',
+            height: 'var(--nav-height)',
             gap: '32px',
         }}>
             <span style={{ fontWeight: 600, fontSize: '15px', color: 'var(--accent)', letterSpacing: '-0.02em' }}>
                 Post Office
             </span>
             <div style={{ display: 'flex', gap: '4px' }}>
-                <NavLink href="/" label="JSON Formatter" active={pathname === '/'} />
-                <NavLink href="/api-tester" label="API Tester" active={pathname === '/api-tester'} />
+                <NavLink href="/" label="Home" active={pathname === '/'} />
+                <NavLink href="/json" label="JSON Formatter" active={pathname === '/json'} />
+                <NavLink href="/api" label="API Tester" active={pathname === '/api'} />
             </div>
         </nav>
     );
@@ -29,16 +30,7 @@ export default function NavBar() {
 
 function NavLink({ href, label, active }: { href: string; label: string; active: boolean }) {
     return (
-        <Link href={href} style={{
-            color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
-            textDecoration: 'none',
-            fontSize: '13px',
-            fontWeight: 500,
-            padding: '6px 12px',
-            borderRadius: '6px',
-            background: active ? 'var(--bg-elevated)' : 'transparent',
-            transition: 'all 0.15s',
-        }}>
+        <Link href={href} className={`nav-link ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
             {label}
         </Link>
     );
