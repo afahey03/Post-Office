@@ -49,6 +49,7 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 16px;
+    margin-bottom: 18px;
 }
 
 .home-link-card {
@@ -82,6 +83,66 @@
     color: var(--text-secondary);
     font-size: 13px;
     line-height: 1.5;
+}
+
+.home-contact {
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+}
+
+.home-contact-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+}
+
+.home-contact-copy {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+
+.home-contact-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.home-contact-link {
+    text-decoration: none;
+    color: var(--text-primary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+}
+
+.linkedin-icon {
+    display: block;
+    transform: translate(1.25px, -0.5px);
+}
+
+.linkedin-link {
+    padding-right: 1px;
+}
+
+.home-contact-link:hover {
+    border-color: var(--border-bright);
+    color: var(--accent-hover);
+}
+
+.home-contact-link:focus-visible {
+    outline: 1px solid var(--border-bright);
+    outline-offset: 2px;
 }
 
 .json-output {
