@@ -316,7 +316,9 @@ export default function ApiTester() {
                         </button>
                     </div>
                 </div>
-                {built !== displayUrl && displayUrl && <div className="url-preview">→ {built}</div>}
+                <div className={`url-preview ${built !== displayUrl && displayUrl ? '' : 'url-preview-hidden'}`} aria-hidden={built === displayUrl || !displayUrl}>
+                    {built !== displayUrl && displayUrl ? `→ ${built}` : '\u00A0'}
+                </div>
             </div>
 
             <div className="split-2-tight split-fill">

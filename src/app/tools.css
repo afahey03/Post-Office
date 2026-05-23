@@ -538,6 +538,10 @@ textarea.body-input:focus {
     font-family: var(--font-mono);
 }
 
+.url-preview-hidden {
+    visibility: hidden;
+}
+
 .url-row {
     display: flex;
     gap: 0;
