@@ -17,8 +17,10 @@ Post Office is a browser-based developer tool that combines a JSON formatter and
 ## Tech Stack
 
 - Next.js
+- React
 - TypeScript
 - Tailwind
+- Redis
 
 ## Functionality
 
