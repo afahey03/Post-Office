@@ -75,11 +75,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
-          cache: npm
-      - run: npm ci
-      - name: Validate Vercel secrets
+      - name: Deploy
         run: |
-          test -n "$VERCEL_TOKEN" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
-          test -n "$VERCEL_ORG_ID" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
-          test -n "$VERCEL_PROJECT_ID" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
-      - run: npx vercel --prod --yes --token="$VERCEL_TOKEN"
+          : "${VERCEL_TOKEN:?Missing secret: VERCEL_TOKEN}"
+          : "${VERCEL_ORG_ID:?Missing secret: VERCEL_ORG_ID}"
+          : "${VERCEL_PROJECT_ID:?Missing secret: VERCEL_PROJECT_ID}"
+          npx vercel --prod --yes --token="$VERCEL_TOKEN"
