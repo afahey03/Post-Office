@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Copy, Check, Eraser, Minimize2 } from 'lucide-react';
 import JsonCodeEditor from '@/components/JsonCodeEditor';
-import { formatJson, type FormatStatus } from '@/lib/formatJson';
+import { analyzeJson, formatJson, sortJsonKeys, stripEmptyJson, type FormatStatus } from '@/lib/formatJson';
 import { syntaxHighlight } from '@/lib/jsonHighlight';
 import { copyToClipboard } from '@/lib/copyToClipboard';
 
@@ -19,6 +19,8 @@ export default function JsonFormatter() {
     const [input, setInput] = useState('');
     const [indent, setIndent] = useState(2);
     const [compactOutput, setCompactOutput] = useState(false);
+    const [sortKeys, setSortKeys] = useState(false);
+    const [stripEmpty, setStripEmpty] = useState(false);
     const [output, setOutput] = useState('');
     const [status, setStatus] = useState<FormatStatus>('idle');
     const [error, setError] = useState('');
@@ -26,22 +28,54 @@ export default function JsonFormatter() {
     const [copied, setCopied] = useState(false);
     const [copyError, setCopyError] = useState(false);
 
-    const process = useCallback((raw: string, ind: number, compact: boolean) => {
+    const process = useCallback((raw: string, ind: number, compact: boolean, sort: boolean, strip: boolean) => {
         const res = formatJson(raw, ind);
-        if (res.status === 'valid' && compact) {
-            setOutput(JSON.stringify(JSON.parse(raw)));
+        if (res.status === 'valid') {
+            const parsed = JSON.parse(raw);
+            const transformed = strip ? stripEmptyJson(parsed) : parsed;
+            const normalized = sort ? sortJsonKeys(transformed) : transformed;
+            setOutput(compact ? JSON.stringify(normalized) : JSON.stringify(normalized, null, ind));
+            setStats(analyzeJson(normalized));
         } else {
             setOutput(res.result);
+            setStats(res.stats || null);
         }
         setStatus(res.status);
         setError(res.error || '');
-        setStats(res.stats || null);
     }, []);
 
     useEffect(() => {
-        const timer = window.setTimeout(() => process(input, indent, compactOutput), DEBOUNCE_MS);
+        const timer = window.setTimeout(() => process(input, indent, compactOutput, sortKeys, stripEmpty), DEBOUNCE_MS);
         return () => window.clearTimeout(timer);
-    }, [input, indent, compactOutput, process]);
+    }, [input, indent, compactOutput, sortKeys, stripEmpty, process]);
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+            if (event.key.toLowerCase() === 'm') {
+                event.preventDefault();
+                try {
+                    JSON.parse(input);
+                    setCompactOutput((current) => !current);
+                } catch {
+                    /* invalid json */
+                }
+            }
+            if (event.key.toLowerCase() === 'c' && output) {
+                event.preventDefault();
+                void (async () => {
+                    const ok = await copyToClipboard(output);
+                    setCopyError(!ok);
+                    if (ok) {
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 1500);
+                    }
+                })();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [input, output]);
 
     const handleIndent = (val: number) => {
         setIndent(val);
@@ -74,6 +108,8 @@ export default function JsonFormatter() {
     const clear = () => {
         setInput('');
         setCompactOutput(false);
+        setSortKeys(false);
+        setStripEmpty(false);
         setOutput('');
         setStatus('idle');
         setError('');
@@ -102,6 +138,24 @@ export default function JsonFormatter() {
                         <option value={4}>4 spaces</option>
                         <option value={1}>1 space</option>
                     </select>
+                    <button
+                        type="button"
+                        className={`tool-btn ${sortKeys ? 'accent' : ''}`}
+                        onClick={() => setSortKeys((current) => !current)}
+                        disabled={status === 'error'}
+                        aria-pressed={sortKeys}
+                    >
+                        Sort keys
+                    </button>
+                    <button
+                        type="button"
+                        className={`tool-btn ${stripEmpty ? 'accent' : ''}`}
+                        onClick={() => setStripEmpty((current) => !current)}
+                        disabled={status === 'error'}
+                        aria-pressed={stripEmpty}
+                    >
+                        Strip empty
+                    </button>
                     <button
                         type="button"
                         className={`tool-btn ${compactOutput && status === 'valid' ? 'accent' : ''}`}

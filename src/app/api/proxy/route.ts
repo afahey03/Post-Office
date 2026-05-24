@@ -1,4 +1,4 @@
-import { assertProxyTargetAllowed, PROXY_MAX_BODY_BYTES, PROXY_TIMEOUT_MS } from '@/lib/proxyValidate';
+import { assertProxyTargetAllowed, clampProxyTimeoutMs, PROXY_MAX_BODY_BYTES } from '@/lib/proxyValidate';
 
 const FORWARD_HEADER_BLOCK = new Set([
     'host',
@@ -15,6 +15,7 @@ interface ProxyRequestBody {
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    timeoutMs?: number;
 }
 
 export async function POST(request: Request) {
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
         return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { url, method = 'GET', headers = {}, body } = payload;
+    const { url, method = 'GET', headers = {}, body, timeoutMs } = payload;
     if (!url || typeof url !== 'string') {
         return Response.json({ error: 'url is required' }, { status: 400 });
     }
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
     });
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+    const timeout = setTimeout(() => controller.abort(), clampProxyTimeoutMs(timeoutMs));
 
     try {
         const upstream = await fetch(target.toString(), {

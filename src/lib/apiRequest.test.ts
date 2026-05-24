@@ -22,6 +22,27 @@ describe('buildRequestHeaders', () => {
         );
         expect(headers['Content-Type']).toBeUndefined();
     });
+
+    it('does not overwrite explicit content-type header', () => {
+        const headers = buildRequestHeaders(
+            [{ key: 'content-type', value: 'text/plain', enabled: true }],
+            { type: 'none', bearerToken: '', basicUser: '', basicPass: '', apiKey: '', apiKeyHeader: 'X-API-Key' },
+            'application/json',
+            true,
+        );
+        expect(headers['content-type']).toBe('text/plain');
+        expect(headers['Content-Type']).toBeUndefined();
+    });
+
+    it('lets auth header override user-provided authorization', () => {
+        const headers = buildRequestHeaders(
+            [{ key: 'Authorization', value: 'Basic old', enabled: true }],
+            { type: 'bearer', bearerToken: 'newtoken', basicUser: '', basicPass: '', apiKey: '', apiKeyHeader: 'X-API-Key' },
+            'none',
+            false,
+        );
+        expect(headers.Authorization).toBe('Bearer newtoken');
+    });
 });
 
 describe('resolveAbsoluteBase', () => {
@@ -35,5 +56,10 @@ describe('resolveRequestUrl', () => {
         const res = resolveRequestUrl('https://example.com', [], true, 'http://localhost:3000');
         expect(res.fetchUrl).toBe('http://localhost:3000/api/proxy');
         expect(res.targetUrl).toBe('https://example.com');
+    });
+
+    it('falls back to relative proxy endpoint without origin', () => {
+        const res = resolveRequestUrl('https://example.com', [], true);
+        expect(res.fetchUrl).toBe('/api/proxy');
     });
 });

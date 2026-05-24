@@ -20,4 +20,14 @@ describe('buildUrlWithParams', () => {
         ]);
         expect(result).toBe('https://api.test/items');
     });
+
+    it('preserves malformed base and appends params safely', () => {
+        const result = buildUrlWithParams('::bad-url::', [{ key: 'q', value: 'test', enabled: true }]);
+        expect(result).toBe('::bad-url::?q=test');
+    });
+
+    it('replaces existing key values', () => {
+        const result = buildUrlWithParams('https://api.test/items?limit=10', [{ key: 'limit', value: '20', enabled: true }]);
+        expect(result).toBe('https://api.test/items?limit=20');
+    });
 });

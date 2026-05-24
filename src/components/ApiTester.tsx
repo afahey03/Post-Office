@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, Loader2, Send, X } from 'lucide-react';
+import { ChevronDown, Copy, Download, History, Loader2, Save, Send, Upload, X } from 'lucide-react';
 import {
     buildRequestHeaders,
     resolveAbsoluteBase,
@@ -12,7 +12,21 @@ import {
 } from '@/lib/apiRequest';
 import { buildUrlWithParams } from '@/lib/buildUrl';
 import { syntaxHighlight, isJsonString } from '@/lib/jsonHighlight';
-import { loadApiState, saveApiState, type PersistedApiState } from '@/lib/apiStorage';
+import { copyToClipboard } from '@/lib/copyToClipboard';
+import { parseCurlCommand, requestToCurl } from '@/lib/curl';
+import {
+    clearApiHistory,
+    loadApiCollections,
+    loadApiHistory,
+    loadApiState,
+    pushApiHistoryEntry,
+    saveApiCollections,
+    saveApiState,
+    type ApiHistoryEntry,
+    type PersistedApiState,
+    type RequestSnapshot,
+    type SavedRequestCollection,
+} from '@/lib/apiStorage';
 
 type TabKey = 'params' | 'headers' | 'body' | 'auth';
 type ResponseTab = 'body' | 'headers' | 'info';
@@ -78,12 +92,61 @@ const PRESETS = [
     { label: 'JokeAPI', method: 'GET' as HttpMethod, url: 'https://v2.jokeapi.dev/joke/Programming?safe-mode' }
 ];
 
+const DEFAULT_TIMEOUT_MS = 30_000;
+const MIN_TIMEOUT_MS = 1_000;
+const MAX_TIMEOUT_MS = 120_000;
+
+function clampTimeoutMs(value: number): number {
+    if (!Number.isFinite(value)) return DEFAULT_TIMEOUT_MS;
+    return Math.max(MIN_TIMEOUT_MS, Math.min(MAX_TIMEOUT_MS, Math.round(value)));
+}
+
+function normalizeRows(rows: { key: string; value: string; enabled: boolean }[]) {
+    return rows.filter((row) => row.key || row.value);
+}
+
+function makeSnapshot(payload: {
+    method: HttpMethod;
+    url: string;
+    params: KeyValue[];
+    headers: KeyValue[];
+    body: string;
+    bodyContentType: BodyContentType;
+    authType: AuthType;
+    apiKeyHeader: string;
+    useProxy: boolean;
+    timeoutMs: number;
+}): RequestSnapshot {
+    return {
+        method: payload.method,
+        url: payload.url,
+        params: normalizeRows(kvToRows(payload.params)),
+        headers: normalizeRows(kvToRows(payload.headers)),
+        body: payload.body,
+        bodyContentType: payload.bodyContentType,
+        authType: payload.authType,
+        apiKeyHeader: payload.apiKeyHeader,
+        useProxy: payload.useProxy,
+        timeoutMs: clampTimeoutMs(payload.timeoutMs),
+    };
+}
+
+function appendBlankRow(rows: { key: string; value: string; enabled: boolean }[]): { key: string; value: string; enabled: boolean }[] {
+    const withRows = rows.length ? rows : [{ key: '', value: '', enabled: true }];
+    if (!withRows.some((r) => !r.key)) {
+        withRows.push({ key: '', value: '', enabled: true });
+    }
+    return withRows;
+}
+
 function readInitialSaved(): Partial<PersistedApiState> | null {
     return loadApiState();
 }
 
 export default function ApiTester() {
     const abortRef = useRef<AbortController | null>(null);
+    const sendShortcutRef = useRef<() => Promise<void>>(async () => { });
+    const copyShortcutRef = useRef<() => Promise<void>>(async () => { });
     const saved = readInitialSaved();
 
     const [method, setMethod] = useState<HttpMethod>(() => (saved?.method as HttpMethod) || 'GET');
@@ -103,9 +166,18 @@ export default function ApiTester() {
     const [basicPass, setBasicPass] = useState('');
     const [apiKey, setApiKey] = useState('');
     const [apiKeyHeader, setApiKeyHeader] = useState(() => saved?.apiKeyHeader || 'X-API-Key');
+    const [timeoutMs, setTimeoutMs] = useState(() => clampTimeoutMs(saved?.timeoutMs ?? DEFAULT_TIMEOUT_MS));
     const [loading, setLoading] = useState(false);
     const [response, setResponse] = useState<ApiResponse | null>(null);
     const [error, setError] = useState('');
+    const [history, setHistory] = useState<ApiHistoryEntry[]>(() => loadApiHistory());
+    const [collections, setCollections] = useState<SavedRequestCollection[]>(() => loadApiCollections());
+    const [selectedCollectionId, setSelectedCollectionId] = useState('');
+    const [collectionName, setCollectionName] = useState('');
+    const [curlInput, setCurlInput] = useState('');
+    const [responsePretty, setResponsePretty] = useState(true);
+    const [responseCopyState, setResponseCopyState] = useState<'idle' | 'ok' | 'error'>('idle');
+    const [curlCopyState, setCurlCopyState] = useState<'idle' | 'ok' | 'error'>('idle');
 
     useEffect(() => {
         saveApiState({
@@ -118,8 +190,13 @@ export default function ApiTester() {
             authType,
             apiKeyHeader,
             useProxy,
+            timeoutMs,
         });
-    }, [method, url, params, headers, body, bodyContentType, authType, apiKeyHeader, useProxy]);
+    }, [method, url, params, headers, body, bodyContentType, authType, apiKeyHeader, useProxy, timeoutMs]);
+
+    useEffect(() => {
+        saveApiCollections(collections);
+    }, [collections]);
 
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
 
@@ -133,14 +210,42 @@ export default function ApiTester() {
         setLoading(false);
     };
 
+    const applySnapshot = useCallback((snapshot: RequestSnapshot) => {
+        setMethod((snapshot.method as HttpMethod) || 'GET');
+        setUrl(snapshot.url || '');
+        setParams(rowsToKV(appendBlankRow(snapshot.params || [])));
+        setHeaders(rowsToKV(appendBlankRow(snapshot.headers || [])));
+        setBody(snapshot.body || '');
+        setBodyContentType((snapshot.bodyContentType as BodyContentType) || 'application/json');
+        setAuthType((snapshot.authType as AuthType) || 'none');
+        setApiKeyHeader(snapshot.apiKeyHeader || 'X-API-Key');
+        setUseProxy(Boolean(snapshot.useProxy));
+        setTimeoutMs(clampTimeoutMs(snapshot.timeoutMs ?? DEFAULT_TIMEOUT_MS));
+    }, []);
 
-    const send = async () => {
+    const snapshot = useCallback(() => {
+        return makeSnapshot({
+            method,
+            url,
+            params,
+            headers,
+            body,
+            bodyContentType,
+            authType,
+            apiKeyHeader,
+            useProxy,
+            timeoutMs,
+        });
+    }, [method, url, params, headers, body, bodyContentType, authType, apiKeyHeader, useProxy, timeoutMs]);
+
+    const send = useCallback(async () => {
         const finalTarget = targetUrl();
         if (!finalTarget) return;
 
         abortRef.current?.abort();
         const controller = new AbortController();
         abortRef.current = controller;
+        const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
 
         setLoading(true);
         setError('');
@@ -160,6 +265,7 @@ export default function ApiTester() {
 
         try {
             let res: Response;
+            let finalStatus = 0;
             if (useProxy) {
                 res = await fetch(fetchUrl, {
                     method: 'POST',
@@ -169,6 +275,7 @@ export default function ApiTester() {
                         method,
                         headers: reqHeaders,
                         body: hasBody ? body : undefined,
+                        timeoutMs,
                     }),
                     signal: controller.signal,
                 });
@@ -177,6 +284,7 @@ export default function ApiTester() {
                     throw new Error(proxyPayload.error || `Proxy error (${res.status})`);
                 }
                 const elapsed = Math.round(performance.now() - start);
+                finalStatus = proxyPayload.status;
                 setResponse({
                     status: proxyPayload.status,
                     statusText: proxyPayload.statusText,
@@ -196,6 +304,7 @@ export default function ApiTester() {
                 res.headers.forEach((v, k) => {
                     resHeaders[k] = v;
                 });
+                finalStatus = res.status;
                 setResponse({
                     status: res.status,
                     statusText: res.statusText,
@@ -206,16 +315,157 @@ export default function ApiTester() {
                 });
             }
             setRespTab('body');
+            const nextHistoryEntry: ApiHistoryEntry = {
+                id: uid(),
+                timestamp: new Date().toISOString(),
+                status: finalStatus,
+                durationMs: Math.round(performance.now() - start),
+                snapshot: snapshot(),
+            };
+            pushApiHistoryEntry(nextHistoryEntry);
+            setHistory(loadApiHistory());
         } catch (e) {
-            if ((e as Error).name === 'AbortError') return;
+            if ((e as Error).name === 'AbortError') {
+                setError('Request timed out or was cancelled');
+                pushApiHistoryEntry({
+                    id: uid(),
+                    timestamp: new Date().toISOString(),
+                    status: 0,
+                    durationMs: Math.round(performance.now() - start),
+                    snapshot: snapshot(),
+                });
+                setHistory(loadApiHistory());
+                return;
+            }
             setError((e as Error).message);
+            pushApiHistoryEntry({
+                id: uid(),
+                timestamp: new Date().toISOString(),
+                status: 0,
+                durationMs: Math.round(performance.now() - start),
+                snapshot: snapshot(),
+            });
+            setHistory(loadApiHistory());
         } finally {
+            window.clearTimeout(timeout);
             if (abortRef.current === controller) {
                 abortRef.current = null;
                 setLoading(false);
             }
         }
+    }, [
+        targetUrl,
+        timeoutMs,
+        method,
+        body,
+        bodyContentType,
+        headers,
+        authType,
+        bearerToken,
+        basicUser,
+        basicPass,
+        apiKey,
+        apiKeyHeader,
+        url,
+        params,
+        useProxy,
+        origin,
+        snapshot,
+    ]);
+
+    const copyResponseBody = useCallback(async () => {
+        if (!response) return;
+        const ok = await copyToClipboard(response.body);
+        setResponseCopyState(ok ? 'ok' : 'error');
+        window.setTimeout(() => setResponseCopyState('idle'), 1200);
+    }, [response]);
+
+    useEffect(() => {
+        sendShortcutRef.current = send;
+        copyShortcutRef.current = copyResponseBody;
+    }, [send, copyResponseBody]);
+
+    const downloadResponseBody = () => {
+        if (!response) return;
+        const isJson = isJsonString(response.body);
+        let content = response.body;
+        if (isJson && responsePretty) {
+            try {
+                content = JSON.stringify(JSON.parse(response.body), null, 2);
+            } catch {
+                content = response.body;
+            }
+        }
+        const ext = isJson ? 'json' : 'txt';
+        const blob = new Blob([content], { type: isJson ? 'application/json' : 'text/plain' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `response-${Date.now()}.${ext}`;
+        link.click();
+        URL.revokeObjectURL(link.href);
     };
+
+    const saveCurrentCollection = () => {
+        const name = collectionName.trim();
+        if (!name) return;
+        const next: SavedRequestCollection = {
+            id: uid(),
+            name,
+            createdAt: new Date().toISOString(),
+            snapshot: snapshot(),
+        };
+        setCollections((current) => [next, ...current]);
+        setCollectionName('');
+    };
+
+    const removeSelectedCollection = () => {
+        if (!selectedCollectionId) return;
+        setCollections((current) => current.filter((item) => item.id !== selectedCollectionId));
+        setSelectedCollectionId('');
+    };
+
+    const clearAllCollections = () => {
+        setCollections([]);
+        setSelectedCollectionId('');
+    };
+
+    const importCurl = () => {
+        try {
+            const parsed = parseCurlCommand(curlInput);
+            setMethod(parsed.method);
+            setUrl(parsed.url);
+            setHeaders(rowsToKV(appendBlankRow(parsed.headers)));
+            setBody(parsed.body);
+            setBodyContentType(parsed.bodyContentType);
+            setTab('headers');
+            setError('');
+        } catch (e) {
+            setError((e as Error).message);
+        }
+    };
+
+    const copyCurl = async () => {
+        const ok = await copyToClipboard(requestToCurl(snapshot()));
+        setCurlCopyState(ok ? 'ok' : 'error');
+        window.setTimeout(() => setCurlCopyState('idle'), 1200);
+    };
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            if (event.key === 'Enter' && !loading && url.trim()) {
+                event.preventDefault();
+                void sendShortcutRef.current();
+                return;
+            }
+            if (event.shiftKey && event.key.toLowerCase() === 'c' && response) {
+                event.preventDefault();
+                void copyShortcutRef.current();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [loading, url, response]);
 
     const updateKV = (
         list: KeyValue[],
@@ -258,6 +508,118 @@ export default function ApiTester() {
                     <input type="checkbox" checked={useProxy} onChange={(e) => setUseProxy(e.target.checked)} />
                     Use server proxy (bypasses CORS, blocks localhost/private IPs)
                 </label>
+                <div className="api-meta-row">
+                    <label className="toolbar-label" htmlFor="request-timeout-ms">
+                        Timeout (ms)
+                    </label>
+                    <input
+                        id="request-timeout-ms"
+                        className="api-input timeout-input"
+                        type="number"
+                        min={MIN_TIMEOUT_MS}
+                        max={MAX_TIMEOUT_MS}
+                        value={timeoutMs}
+                        onChange={(e) => setTimeoutMs(clampTimeoutMs(Number(e.target.value)))}
+                    />
+                    <span className="stats-hint">Ctrl/Cmd + Enter to send</span>
+                </div>
+
+                <div className="api-tools-row">
+                    <input
+                        className="api-input curl-input"
+                        value={curlInput}
+                        onChange={(e) => setCurlInput(e.target.value)}
+                        placeholder="Paste curl command"
+                        aria-label="cURL command"
+                    />
+                    <button type="button" className="tool-btn" onClick={importCurl} disabled={!curlInput.trim()}>
+                        <Upload size={14} aria-hidden />
+                        Import cURL
+                    </button>
+                    <button type="button" className="tool-btn" onClick={copyCurl}>
+                        <Copy size={14} aria-hidden />
+                        {curlCopyState === 'ok' ? 'cURL copied' : curlCopyState === 'error' ? 'Copy failed' : 'Copy cURL'}
+                    </button>
+                </div>
+
+                <div className="api-tools-row">
+                    <input
+                        className="api-input collection-input"
+                        value={collectionName}
+                        onChange={(e) => setCollectionName(e.target.value)}
+                        placeholder="Save request as..."
+                        aria-label="Collection name"
+                    />
+                    <button type="button" className="tool-btn" onClick={saveCurrentCollection} disabled={!collectionName.trim()}>
+                        <Save size={14} aria-hidden />
+                        Save
+                    </button>
+                    <select
+                        className="tool-select"
+                        aria-label="Saved requests"
+                        value={selectedCollectionId}
+                        onChange={(e) => {
+                            setSelectedCollectionId(e.target.value);
+                            const found = collections.find((item) => item.id === e.target.value);
+                            if (found) applySnapshot(found.snapshot);
+                        }}
+                    >
+                        <option value="" disabled>
+                            Load saved request
+                        </option>
+                        {collections.map((item) => (
+                            <option key={item.id} value={item.id}>
+                                {item.name}
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        type="button"
+                        className="tool-btn danger"
+                        onClick={removeSelectedCollection}
+                        disabled={!selectedCollectionId}
+                    >
+                        Delete saved
+                    </button>
+                    <button
+                        type="button"
+                        className="tool-btn danger"
+                        onClick={clearAllCollections}
+                        disabled={!collections.length}
+                    >
+                        Clear saved
+                    </button>
+                    <select
+                        className="tool-select"
+                        aria-label="Recent history"
+                        value=""
+                        onChange={(e) => {
+                            const found = history.find((item) => item.id === e.target.value);
+                            if (found) applySnapshot(found.snapshot);
+                        }}
+                    >
+                        <option value="" disabled>
+                            Recent history
+                        </option>
+                        {history.map((item) => (
+                            <option key={item.id} value={item.id}>
+                                [{item.status}] {item.snapshot.method} {item.snapshot.url}
+                            </option>
+                        ))}
+                    </select>
+                    <button
+                        type="button"
+                        className="tool-btn"
+                        onClick={() => {
+                            clearApiHistory();
+                            setHistory([]);
+                        }}
+                        disabled={!history.length}
+                    >
+                        <History size={14} aria-hidden />
+                        Clear history
+                    </button>
+                </div>
                 <div className="preset-row">
                     {PRESETS.map((p) => (
                         <button key={p.label} type="button" className="preset-btn" onClick={() => loadPreset(p)}>
@@ -398,6 +760,31 @@ export default function ApiTester() {
                             </button>
                         ))}
                         {response && (
+                            <div className="response-actions">
+                                {respTab === 'body' && isJsonString(response.body) && (
+                                    <button
+                                        type="button"
+                                        className={`tool-btn ${responsePretty ? 'accent' : ''}`}
+                                        onClick={() => setResponsePretty((current) => !current)}
+                                    >
+                                        {responsePretty ? 'Pretty' : 'Raw'}
+                                    </button>
+                                )}
+                                <button type="button" className="tool-btn" onClick={copyResponseBody}>
+                                    <Copy size={14} aria-hidden />
+                                    {responseCopyState === 'ok'
+                                        ? 'Copied'
+                                        : responseCopyState === 'error'
+                                            ? 'Copy failed'
+                                            : 'Copy body'}
+                                </button>
+                                <button type="button" className="tool-btn" onClick={downloadResponseBody}>
+                                    <Download size={14} aria-hidden />
+                                    Download
+                                </button>
+                            </div>
+                        )}
+                        {response && (
                             <div className="response-meta">
                                 <span className="response-status" style={{ color: statusColor(response.status) }}>
                                     {response.status} {response.statusText}
@@ -429,10 +816,14 @@ export default function ApiTester() {
                             <>
                                 {respTab === 'body' &&
                                     (isJsonString(response.body) ? (
-                                        <pre
-                                            className="json-output response-pre"
-                                            dangerouslySetInnerHTML={{ __html: syntaxHighlight(response.body, { prettify: true }) }}
-                                        />
+                                        responsePretty ? (
+                                            <pre
+                                                className="json-output response-pre"
+                                                dangerouslySetInnerHTML={{ __html: syntaxHighlight(response.body, { prettify: true }) }}
+                                            />
+                                        ) : (
+                                            <pre className="response-pre plain-pre">{response.body}</pre>
+                                        )
                                     ) : (
                                         <pre className="response-pre plain-pre">{response.body}</pre>
                                     ))}

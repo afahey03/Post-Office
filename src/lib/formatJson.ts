@@ -15,6 +15,45 @@ export interface FormatJsonResult {
     stats?: JsonStats;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function sortJsonKeys(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        return value.map((item) => sortJsonKeys(item));
+    }
+    if (!isPlainObject(value)) {
+        return value;
+    }
+    const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    return Object.fromEntries(entries.map(([key, child]) => [key, sortJsonKeys(child)]));
+}
+
+function isEmptyValue(value: unknown): boolean {
+    if (value === null) return true;
+    if (value === '') return true;
+    if (Array.isArray(value)) return value.length === 0;
+    if (isPlainObject(value)) return Object.keys(value).length === 0;
+    return false;
+}
+
+export function stripEmptyJson(value: unknown): unknown {
+    if (Array.isArray(value)) {
+        const next = value.map((item) => stripEmptyJson(item)).filter((item) => !isEmptyValue(item));
+        return next;
+    }
+    if (!isPlainObject(value)) {
+        return value;
+    }
+
+    const nextEntries = Object.entries(value)
+        .map(([key, child]) => [key, stripEmptyJson(child)] as const)
+        .filter(([, child]) => !isEmptyValue(child));
+
+    return Object.fromEntries(nextEntries);
+}
+
 export function analyzeJson(obj: unknown): JsonStats {
     let keyCount = 0;
     let maxDepth = 0;

@@ -366,6 +366,25 @@ textarea.body-input:focus-visible {
     border-color: var(--border-bright);
 }
 
+.api-meta-row,
+.api-tools-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    flex-wrap: wrap;
+}
+
+.timeout-input {
+    width: 130px;
+}
+
+.curl-input,
+.collection-input {
+    flex: 1;
+    min-width: 180px;
+}
+
 .tab-btn {
     background: none;
     border: none;
@@ -650,6 +669,12 @@ textarea.body-input:focus {
     gap: 8px;
 }
 
+.response-actions {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+}
+
 .tab-panel {
     padding: 16px;
     overflow: auto;
@@ -788,7 +813,7 @@ textarea.body-input:focus {
 }
 
 .response-meta {
-    margin-left: auto;
+    margin-left: 0;
     display: flex;
     gap: 12px;
     align-items: center;
@@ -826,6 +851,11 @@ textarea.body-input:focus {
     .url-row {
         flex-wrap: wrap;
         gap: 8px;
+    }
+
+    .response-actions {
+        margin-left: 0;
+        width: 100%;
     }
 
     .method-select {
@@ -879,6 +909,18 @@ textarea.body-input:focus {
         width: 100%;
         margin-left: 0;
         justify-content: flex-start;
+    }
+
+    .api-meta-row,
+    .api-tools-row {
+        align-items: stretch;
+    }
+
+    .timeout-input,
+    .curl-input,
+    .collection-input {
+        width: 100%;
+        min-width: 0;
     }
 }
 
